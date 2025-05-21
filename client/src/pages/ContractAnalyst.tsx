@@ -52,39 +52,14 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.j
 // Animation keyframes
 const scannerAnimation = keyframes`
   from {
-    top: 0;
+    transform: translateY(0);
   }
   to {
-    top: calc(100% - 2px);
+    transform: translateY(var(--text-content-height));
   }
 `;
 
-const scannerGradient = keyframes`
-  0% {
-    background: linear-gradient(
-      180deg,
-      rgba(79, 70, 229, 0.2) 0%,
-      rgba(79, 70, 229, 0.1) 50%,
-      rgba(79, 70, 229, 0) 100%
-    );
-  }
-  50% {
-    background: linear-gradient(
-      180deg,
-      rgba(79, 70, 229, 0.3) 0%,
-      rgba(79, 70, 229, 0.15) 50%,
-      rgba(79, 70, 229, 0) 100%
-    );
-  }
-  100% {
-    background: linear-gradient(
-      180deg,
-      rgba(79, 70, 229, 0.2) 0%,
-      rgba(79, 70, 229, 0.1) 50%,
-      rgba(79, 70, 229, 0) 100%
-    );
-  }
-`;
+
 
 const wordHighlight = keyframes`
   0% {
@@ -179,6 +154,22 @@ const termCardAppear = keyframes`
   }
 `;
 
+// Add this new animation after the other keyframes definitions
+const pulseHighlight = keyframes`
+  0% {
+    background-color: rgba(79, 70, 229, 0);
+  }
+  25% {
+    background-color: rgba(79, 70, 229, 0.4);
+  }
+  75% {
+    background-color: rgba(79, 70, 229, 0.4);
+  }
+  100% {
+    background-color: rgba(79, 70, 229, 0);
+  }
+`;
+
 // Add types for term extraction
 interface ExtractedTerm {
   id: string;
@@ -189,6 +180,7 @@ interface ExtractedTerm {
     start: number;
     end: number;
   };
+  isClicked?: boolean;
 }
 
 interface Category {
@@ -256,6 +248,9 @@ const ContractAnalyst = () => {
   const [shouldStartExtraction, setShouldStartExtraction] = useState(false);
   const [hasTabSwitched, setHasTabSwitched] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+
+  // Add a ref to track the actual text height
+  const textContentHeightRef = useRef<number>(0);
 
   // Check for reduced motion preference
   useEffect(() => {
@@ -341,124 +336,11 @@ const ContractAnalyst = () => {
     }
   };
 
-  // Effect to handle extraction when arriving at Term Extraction tab
-  useEffect(() => {
-    if ((selectedTab === 1 && previousTab === 0 && shouldStartExtraction && contractText) || 
-        (selectedTab === 1 && shouldStartExtraction && contractText)) {
-      // Reset the flag
-      setShouldStartExtraction(false);
-      
-      // Start extraction immediately
-      setIsExtractingTerms(true);
-      setExtractionProgress(0);
-      setHighlightedTerms([]);
-      setCurrentCategory(null);
-      setExtractionStatus('Initializing term extraction...');
-      setIsExtractionComplete(false);
-      setDiscoveredTerms([]);
-      setScannerPaused(false);
-      setCurrentScanPosition(0);
-      
-      // Reset categories
-      setCategories(cats => cats.map(cat => ({
-        ...cat,
-        isActive: false,
-        isComplete: false
-      })));
-
-      // Optimize random word highlights for longer documents
-      const words = contractText.split(/\s+/);
-      const numHighlights = Math.min(
-        Math.floor(words.length * 0.03), // Reduce to 3% for longer docs
-        100 // Cap at 100 highlights for very long documents
-      );
-      const highlights = Array.from(
-        { length: numHighlights },
-        () => Math.floor(Math.random() * words.length)
-      );
-      setRandomWords(highlights);
-
-      // Adjust animation speed based on document length
-      const baseSpeed = 1500; // Base animation duration in ms
-      const textLength = contractText.length;
-      const speedMultiplier = Math.min(1, 5000 / textLength); // Faster for longer docs
-      const animationDuration = baseSpeed * speedMultiplier;
-
-      // Start the extraction animation
-      let progress = 0;
-      let lastTimestamp = performance.now();
-      let lastTransitionTime = 0;
-      
-      const animate = (timestamp: number) => {
-        const elapsed = timestamp - lastTimestamp;
-        const progressIncrement = (elapsed / animationDuration) * 100;
-        progress = Math.min(progress + progressIncrement, 100);
-        
-        setExtractionProgress(progress);
-        setCurrentScanPosition(progress);
-
-        // Optimized transitions with minimum interval
-        const transitions = [
-          { at: 20, category: 'royalty-rates', complete: [] },
-          { at: 40, category: 'payment-terms', complete: ['royalty-rates'] },
-          { at: 60, category: 'reporting', complete: ['royalty-rates', 'payment-terms'] },
-          { at: 80, category: 'audit-rights', complete: ['royalty-rates', 'payment-terms', 'reporting'] }
-        ];
-
-        const currentTime = performance.now();
-        const minTransitionInterval = 50; // Minimum time between transitions
-
-        const transition = transitions.find(t => 
-          progress >= t.at && 
-          progress < t.at + 1 && 
-          !scannerPaused &&
-          (currentTime - lastTransitionTime) >= minTransitionInterval
-        );
-        
-        if (transition) {
-          lastTransitionTime = currentTime;
-          setScannerPaused(true);
-          setCurrentCategory(transition.category);
-          setExtractionStatus(`Processing ${transition.category.replace('-', ' ')}...`);
-          setCategories(cats => cats.map(cat => ({
-            ...cat,
-            isActive: cat.id === transition.category,
-            isComplete: transition.complete.includes(cat.id)
-          })));
-          
-          // Process terms immediately
-          highlightTermsForCategory(transition.category);
-          
-          // Minimal pause
-          setTimeout(() => setScannerPaused(false), 25);
-        }
-
-        if (progress >= 100) {
-          setIsExtractingTerms(false);
-          setIsExtractionComplete(true);
-          setExtractionStatus('Term extraction complete');
-          setCurrentCategory(null);
-          setScannerPaused(false);
-          setCategories(cats => cats.map(cat => ({
-            ...cat,
-            isActive: false,
-            isComplete: true
-          })));
-        } else {
-          lastTimestamp = timestamp;
-          requestAnimationFrame(animate);
-        }
-      };
-
-      requestAnimationFrame(animate);
-    }
-  }, [selectedTab, previousTab, shouldStartExtraction, contractText]);
-
-  // Function to calculate animation duration based on text length
-  const calculateScanDuration = (textLength: number) => {
-    // Aim for 150-200 characters per second as specified
-    const charsPerSecond = 175; // Middle value
-    const baseDuration = Math.max(textLength / charsPerSecond, 3); // Minimum 3 seconds
+  // Function to calculate animation duration based on text height
+  const calculateScanDuration = (textHeight: number) => {
+    // Aim for consistent pixels per second scanning speed
+    const pixelsPerSecond = 150; // Scan 150 pixels per second
+    const baseDuration = Math.max(textHeight / pixelsPerSecond, 3); // Minimum 3 seconds
     return baseDuration;
   };
 
@@ -646,12 +528,27 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
       const lineHeight = 24; // Approximate line height in pixels
       const charsPerLine = 80; // Approximate characters per line
       const lineNumber = Math.floor(position.start / charsPerLine);
-      const scrollPosition = lineNumber * lineHeight;
+      const scrollPosition = Math.max(0, (lineNumber * lineHeight) - 100); // 100px padding from top
       
+      // Scroll to position with smooth animation
       contractTextRef.current.scrollTo({
         top: scrollPosition,
         behavior: 'smooth'
       });
+
+      // Set the clicked term to trigger highlight animation
+      setHighlightedTerms(prev => prev.map(term => ({
+        ...term,
+        isClicked: term.position.start === position.start && term.position.end === position.end
+      })));
+
+      // Reset the highlight after animation
+      setTimeout(() => {
+        setHighlightedTerms(prev => prev.map(term => ({
+          ...term,
+          isClicked: false
+        })));
+      }, 2000); // Match this with the animation duration
     }
   };
 
@@ -667,6 +564,126 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
       return newSet;
     });
   };
+
+  // Effect to handle extraction when arriving at Term Extraction tab
+  useEffect(() => {
+    if ((selectedTab === 1 && previousTab === 0 && shouldStartExtraction && contractText) || 
+        (selectedTab === 1 && shouldStartExtraction && contractText)) {
+      // Reset the flag
+      setShouldStartExtraction(false);
+      
+      // Start extraction immediately
+      setIsExtractingTerms(true);
+      setExtractionProgress(0);
+      setHighlightedTerms([]);
+      setCurrentCategory(null);
+      setExtractionStatus('Initializing term extraction...');
+      setIsExtractionComplete(false);
+      setDiscoveredTerms([]);
+      setScannerPaused(false);
+      setCurrentScanPosition(0);
+      
+      // Reset categories
+      setCategories(cats => cats.map(cat => ({
+        ...cat,
+        isActive: false,
+        isComplete: false
+      })));
+
+      // Optimize random word highlights for longer documents
+      const words = contractText.split(/\s+/);
+      const numHighlights = Math.min(
+        Math.floor(words.length * 0.03), // Reduce to 3% for longer docs
+        100 // Cap at 100 highlights for very long documents
+      );
+      const highlights = Array.from(
+        { length: numHighlights },
+        () => Math.floor(Math.random() * words.length)
+      );
+      setRandomWords(highlights);
+
+      // Get the text content height and calculate animation duration
+      const textHeight = textContentHeightRef.current || 0;
+      const animationDuration = calculateScanDuration(textHeight) * 1000; // Convert to milliseconds
+
+      // Start the extraction animation
+      let progress = 0;
+      let lastTimestamp = performance.now();
+      let lastTransitionTime = 0;
+      
+      const animate = (timestamp: number) => {
+        const elapsed = timestamp - lastTimestamp;
+        const progressIncrement = (elapsed / animationDuration) * 100;
+        
+        // Calculate actual progress based on text content height
+        const viewportHeight = textContentHeightRef.current || 0;
+        const currentPosition = (progress / 100) * viewportHeight;
+        const newProgress = Math.min(progress + progressIncrement, 100);
+        
+        setExtractionProgress(newProgress);
+        setCurrentScanPosition(newProgress);
+
+        // Calculate relative progress for category transitions
+        const relativeProgress = (currentPosition / viewportHeight) * 100;
+
+        // Optimized transitions with minimum interval
+        const transitions = [
+          { at: 20, category: 'royalty-rates', complete: [] },
+          { at: 40, category: 'payment-terms', complete: ['royalty-rates'] },
+          { at: 60, category: 'reporting', complete: ['royalty-rates', 'payment-terms'] },
+          { at: 80, category: 'audit-rights', complete: ['royalty-rates', 'payment-terms', 'reporting'] }
+        ];
+
+        const currentTime = performance.now();
+        const minTransitionInterval = 50; // Minimum time between transitions
+
+        const transition = transitions.find(t => 
+          relativeProgress >= t.at && 
+          relativeProgress < t.at + 1 && 
+          !scannerPaused &&
+          (currentTime - lastTransitionTime) >= minTransitionInterval
+        );
+        
+        if (transition) {
+          lastTransitionTime = currentTime;
+          setScannerPaused(true);
+          setCurrentCategory(transition.category);
+          setExtractionStatus(`Processing ${transition.category.replace('-', ' ')}...`);
+          setCategories(cats => cats.map(cat => ({
+            ...cat,
+            isActive: cat.id === transition.category,
+            isComplete: transition.complete.includes(cat.id)
+          })));
+          
+          // Process terms immediately
+          highlightTermsForCategory(transition.category);
+          
+          // Minimal pause
+          setTimeout(() => setScannerPaused(false), 25);
+        }
+
+        // Check if we've reached the end of the text content
+        if (currentPosition >= viewportHeight || newProgress >= 100) {
+          setIsExtractingTerms(false);
+          setIsExtractionComplete(true);
+          setExtractionStatus('Term extraction complete');
+          setCurrentCategory(null);
+          setScannerPaused(false);
+          setCategories(cats => cats.map(cat => ({
+            ...cat,
+            isActive: false,
+            isComplete: true
+          })));
+        } else {
+          progress = newProgress;
+          lastTimestamp = timestamp;
+          requestAnimationFrame(animate);
+        }
+      };
+
+      requestAnimationFrame(animate);
+    }
+  }, [selectedTab, previousTab, shouldStartExtraction, contractText]);
 
   return (
     <Box sx={{ width: '100%', bgcolor: '#FAFAFA', minHeight: '100vh', p: 0 }}>
@@ -1460,94 +1477,101 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
                           },
                         }}
                       >
-                        {/* Render contract text with highlighted terms */}
-                        {contractText.split('').map((char, index) => {
-                          const term = highlightedTerms.find(
-                            t => index >= t.position.start && index < t.position.end
-                          );
-                          const isRandomWord = randomWords.includes(
-                            contractText.slice(0, index).split(/\s+/).length
-                          );
-                          
-                          if (term) {
-                            const category = categories.find(c => c.id === term.category);
+                        {/* Text content wrapper */}
+                        <Box
+                          ref={(el: HTMLDivElement | null) => {
+                            if (el) {
+                              const height = el.scrollHeight - 40;
+                              el.style.setProperty('--text-content-height', `${height}px`);
+                              textContentHeightRef.current = height;
+                            }
+                          }}
+                          sx={{ position: 'relative' }}
+                        >
+                          {/* Render contract text with highlighted terms */}
+                          {contractText.split('').map((char, index) => {
+                            const term = highlightedTerms.find(
+                              t => index >= t.position.start && index < t.position.end
+                            );
+                            const isRandomWord = randomWords.includes(
+                              contractText.slice(0, index).split(/\s+/).length
+                            );
+                            
+                                              if (term) {
+                    const category = categories.find(c => c.id === term.category);
+                    return (
+                      <span
+                        key={index}
+                        style={{
+                          backgroundColor: term.isClicked 
+                            ? '#4F46E5' // Full color for clicked term
+                            : category 
+                              ? `${category.color}1A` // 10% opacity for regular terms
+                              : 'transparent',
+                          transition: 'all 0.3s ease',
+                          color: term.isClicked ? 'white' : 'inherit',
+                          padding: term.isClicked ? '0 1px' : '0',
+                          borderRadius: term.isClicked ? '2px' : '0',
+                          animation: isExtractingTerms && currentScanPosition >= index 
+                            ? `${termHighlight} 0.5s ease-in-out`
+                            : 'none',
+                        }}
+                      >
+                        {char}
+                      </span>
+                    );
+                            }
+                            
                             return (
                               <span
                                 key={index}
                                 style={{
-                                  backgroundColor: category 
-                                    ? `${category.color}1A` // 10% opacity
-                                    : 'transparent',
-                                  transition: 'background-color 0.3s ease',
-                                  animation: isExtractingTerms && currentScanPosition >= index 
-                                    ? `${termHighlight} 0.5s ease-in-out`
+                                  animation: isExtractingTerms && isRandomWord && currentScanPosition >= index
+                                    ? `${wordHighlight} 0.3s ease-in-out`
                                     : 'none',
                                 }}
                               >
                                 {char}
                               </span>
                             );
-                          }
-                          
-                          return (
-                            <span
-                              key={index}
-                              style={{
-                                animation: isExtractingTerms && isRandomWord && currentScanPosition >= index
-                                  ? `${wordHighlight} 0.3s ease-in-out`
-                                  : 'none',
-                              }}
-                            >
-                              {char}
-                            </span>
-                          );
-                        })}
+                          })}
 
-                        {/* Scanner line animation */}
-                        {isExtractingTerms && !shouldReduceMotion && (
-                          <Box
-                            role="progressbar"
-                            aria-label="Scanning contract text"
-                            aria-valuenow={Math.round(currentScanPosition)}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            sx={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              height: '40px',
-                              background: `linear-gradient(
-                                180deg,
-                                rgba(79, 70, 229, 0.2) 0%,
-                                rgba(79, 70, 229, 0.1) 50%,
-                                rgba(79, 70, 229, 0) 100%
-                              )`,
-                              animation: `${scannerAnimation} ${calculateScanDuration(contractText.length)}s linear infinite, ${scannerGradient} 1.5s ease-in-out infinite`,
-                              animationPlayState: scannerPaused ? 'paused' : 'running',
-                              pointerEvents: 'none',
-                              '&::after': {
-                                content: '""',
+                          {/* Scanner line animation */}
+                                                    {isExtractingTerms && !shouldReduceMotion && (
+                            <Box
+                              role="progressbar"
+                              aria-label="Scanning contract text"
+                              aria-valuenow={Math.round(currentScanPosition)}
+                              aria-valuemin={0}
+                              aria-valuemax={100}
+                              sx={{
                                 position: 'absolute',
                                 top: 0,
                                 left: 0,
                                 right: 0,
-                                height: '2px',
-                                background: currentCategory
-                                  ? categories.find(c => c.id === currentCategory)?.color
-                                  : '#4F46E5',
-                                boxShadow: theme => `0 0 10px ${
-                                  currentCategory
-                                    ? categories.find(c => c.id === currentCategory)?.color
-                                    : '#4F46E5'
-                                }`,
-                                animation: scannerPaused
-                                  ? `${badgePulse} 0.8s ease-in-out infinite`
-                                  : 'none',
-                              },
-                            }}
-                          />
-                        )}
+                                height: '24px',
+                                bgcolor: 'rgba(156, 163, 175, 0.7)',
+                                animation: `${scannerAnimation} ${calculateScanDuration(textContentHeightRef.current || 0)}s linear infinite`,
+                                animationPlayState: scannerPaused ? 'paused' : 'running',
+                                pointerEvents: 'none',
+                                borderTop: '1px solid rgba(107, 114, 128, 0.9)',
+                                borderBottom: '1px solid rgba(107, 114, 128, 0.9)',
+                                display: 'flex',
+                                justifyContent: 'flex-end',
+                                alignItems: 'center',
+                                pr: 2,
+                                '& .scanning-text': {
+                                  fontSize: '12px',
+                                  color: '#000000',
+                                  fontFamily: 'monospace',
+                                  userSelect: 'none'
+                                }
+                              }}
+                            >
+                              <span className="scanning-text">scanning</span>
+                            </Box>
+                          )}
+                          </Box>
                       </Box>
                     </Paper>
                   </Box>
@@ -1767,8 +1791,9 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
                                       }}>
                                         <Box
                                           sx={{
-                                            px: 1.5,
-                                            py: 0.5,
+                                            px: 2,
+                                            pt: 0.5,
+                                            pb: 1,
                                             borderRadius: '100px',
                                             bgcolor: `rgba(${
                                               categoryTerms[0].confidence >= 0.9 ? '34, 197, 94' :
@@ -1779,21 +1804,40 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
                                                   categoryTerms[0].confidence >= 0.75 ? '#F59E0B' :
                                                   '#EF4444',
                                             display: 'flex',
+                                            flexDirection: 'column',
                                             alignItems: 'center',
                                             gap: 0.5
                                           }}
                                         >
-                                          {categoryTerms[0].confidence >= 0.9 ? <CheckCircleIcon sx={{ fontSize: 14 }} /> :
-                                           categoryTerms[0].confidence >= 0.75 ? <WarningIcon sx={{ fontSize: 14 }} /> :
-                                           <ErrorIcon sx={{ fontSize: 14 }} />}
                                           <Typography
                                             sx={{
-                                              fontSize: '12px',
-                                              fontWeight: 500
+                                              fontSize: '13px',
+                                              fontWeight: 500,
+                                              lineHeight: 1
                                             }}
                                           >
                                             {Math.round(categoryTerms[0].confidence * 100)}% confidence
                                           </Typography>
+                                          <Box
+                                            sx={{
+                                              width: '100%',
+                                              height: '3px',
+                                              bgcolor: 'rgba(0, 0, 0, 0.1)',
+                                              borderRadius: '100px',
+                                              overflow: 'hidden'
+                                            }}
+                                          >
+                                            <Box
+                                              sx={{
+                                                width: `${Math.round(categoryTerms[0].confidence * 100)}%`,
+                                                height: '100%',
+                                                bgcolor: categoryTerms[0].confidence >= 0.9 ? '#22C55E' :
+                                                       categoryTerms[0].confidence >= 0.75 ? '#F59E0B' :
+                                                       '#EF4444',
+                                                transition: 'width 0.3s ease-in-out'
+                                              }}
+                                            />
+                                          </Box>
                                         </Box>
                                         <IconButton
                                           size="small"
@@ -1855,8 +1899,9 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
                                           }}>
                                             <Box
                                               sx={{
-                                                px: 1.5,
-                                                py: 0.5,
+                                                px: 2,
+                                                pt: 0.5,
+                                                pb: 1,
                                                 borderRadius: '100px',
                                                 bgcolor: `rgba(${
                                                   term.confidence >= 0.9 ? '34, 197, 94' :
@@ -1867,21 +1912,40 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
                                                       term.confidence >= 0.75 ? '#F59E0B' :
                                                       '#EF4444',
                                                 display: 'flex',
+                                                flexDirection: 'column',
                                                 alignItems: 'center',
                                                 gap: 0.5
                                               }}
                                             >
-                                              {term.confidence >= 0.9 ? <CheckCircleIcon sx={{ fontSize: 14 }} /> :
-                                               term.confidence >= 0.75 ? <WarningIcon sx={{ fontSize: 14 }} /> :
-                                               <ErrorIcon sx={{ fontSize: 14 }} />}
                                               <Typography
                                                 sx={{
-                                                  fontSize: '12px',
-                                                  fontWeight: 500
+                                                  fontSize: '13px',
+                                                  fontWeight: 500,
+                                                  lineHeight: 1
                                                 }}
                                               >
                                                 {Math.round(term.confidence * 100)}% confidence
                                               </Typography>
+                                              <Box
+                                                sx={{
+                                                  width: '100%',
+                                                  height: '3px',
+                                                  bgcolor: 'rgba(0, 0, 0, 0.1)',
+                                                  borderRadius: '100px',
+                                                  overflow: 'hidden'
+                                                }}
+                                              >
+                                                <Box
+                                                  sx={{
+                                                    width: `${Math.round(term.confidence * 100)}%`,
+                                                    height: '100%',
+                                                    bgcolor: term.confidence >= 0.9 ? '#22C55E' :
+                                                           term.confidence >= 0.75 ? '#F59E0B' :
+                                                           '#EF4444',
+                                                    transition: 'width 0.3s ease-in-out'
+                                                  }}
+                                                />
+                                              </Box>
                                             </Box>
                                             <IconButton
                                               size="small"
