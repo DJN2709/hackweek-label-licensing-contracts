@@ -1,0 +1,16 @@
+apiVersion: tingle.spotify.com/v1alpha1
+kind: Service
+metadata:
+  name: royai-contract
+  owner: your-team
+spec:
+  type: web
+  port: 5001
+  image:
+    build:
+      context: .
+      dockerfile: Dockerfile
+  env:
+    - name: NODE_ENV
+      value: production
+# Add more env variables or secrets as needed 
