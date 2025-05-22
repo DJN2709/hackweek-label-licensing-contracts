@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -45,6 +45,7 @@ import {
 } from '@mui/icons-material';
 import * as pdfjsLib from 'pdfjs-dist';
 import { keyframes } from '@mui/system';
+import { Global } from '@emotion/react';
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
@@ -183,6 +184,13 @@ interface ExtractedTerm {
   isClicked?: boolean;
 }
 
+// Add interface for API response term
+interface ApiTerm {
+  text: string;
+  category: string;
+  confidence?: number;
+}
+
 interface Category {
   id: string;
   name: string;
@@ -190,6 +198,9 @@ interface Category {
   isComplete: boolean;
   color: string;
 }
+
+// Add new type for extraction process state
+type ExtractionProcessState = 'idle' | 'scanning' | 'analyzing' | 'mapping' | 'complete';
 
 // Add this function before the ContractAnalyst component
 const extractTermsFromAPI = async (textContent: string) => {
@@ -289,6 +300,43 @@ const generateMockTermsData = (contractText: string) => {
   };
 }
 
+// Add new keyframes for the futuristic scanner
+const scannerGlow = keyframes`
+  0% {
+    box-shadow: 0 0 24px 8px rgba(99,102,241,0.18), 0 0 0 0 rgba(99,102,241,0.08);
+    background-position: 0% 50%;
+  }
+  50% {
+    box-shadow: 0 0 48px 16px rgba(99,102,241,0.28), 0 0 0 0 rgba(99,102,241,0.12);
+    background-position: 100% 50%;
+  }
+  100% {
+    box-shadow: 0 0 24px 8px rgba(99,102,241,0.18), 0 0 0 0 rgba(99,102,241,0.08);
+    background-position: 0% 50%;
+  }
+`;
+
+const dataStreamAnimation = keyframes`
+  0% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+`;
+
+// Global shimmer keyframes for the scanner highlight
+const shimmerKeyframes = `
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}`;
+
 const ContractAnalyst = () => {
   const [selectedTab, setSelectedTab] = useState<number>(0);
   const [contractText, setContractText] = useState('');
@@ -302,29 +350,57 @@ const ContractAnalyst = () => {
   const [extractedTerms, setExtractedTerms] = useState<ExtractedTerm[]>([]);
   const [categories, setCategories] = useState<Category[]>([
     { 
-      id: 'royalty-rates', 
-      name: 'Royalty Rates', 
+      id: 'payable-currencies', 
+      name: 'Payable Currencies', 
       isActive: false, 
       isComplete: false,
       color: '#4F46E5'
     },
     { 
-      id: 'payment-terms', 
-      name: 'Payment Terms', 
+      id: 'per-user-fee-premium', 
+      name: 'Per User Fee Premium', 
+      isActive: false, 
+      isComplete: false,
+      color: '#4F46E5'
+    },
+    { 
+      id: 'per-user-fee-student', 
+      name: 'Per User Fee Student', 
+      isActive: false, 
+      isComplete: false,
+      color: '#4F46E5'
+    },
+    { 
+      id: 'rev-share-ad', 
+      name: 'Rev Share - ad revenue', 
+      isActive: false, 
+      isComplete: false,
+      color: '#4F46E5'
+    },
+    { 
+      id: 'rev-share-premium', 
+      name: 'Rev Share - premium revenue', 
+      isActive: false, 
+      isComplete: false,
+      color: '#4F46E5'
+    },
+    { 
+      id: 'minimum-guaranteed', 
+      name: 'Minimum Guaranteed', 
+      isActive: false, 
+      isComplete: false,
+      color: '#4F46E5'
+    },
+    { 
+      id: 'advances', 
+      name: 'Advances', 
       isActive: false, 
       isComplete: false,
       color: '#4F46E5'
     },
     { 
       id: 'reporting', 
-      name: 'Reporting Requirements', 
-      isActive: false, 
-      isComplete: false,
-      color: '#4F46E5'
-    },
-    { 
-      id: 'audit-rights', 
-      name: 'Audit Rights', 
+      name: 'Reporting', 
       isActive: false, 
       isComplete: false,
       color: '#4F46E5'
@@ -346,9 +422,67 @@ const ContractAnalyst = () => {
   const [shouldStartExtraction, setShouldStartExtraction] = useState(false);
   const [hasTabSwitched, setHasTabSwitched] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [extractionProcessState, setExtractionProcessState] = useState<ExtractionProcessState>('idle');
 
   // Add a ref to track the actual text height
   const textContentHeightRef = useRef<number>(0);
+
+  // Add scanner start time ref
+  const scannerStartTimeRef = useRef<number>(Date.now());
+
+  // At the top of the component, after hooks
+  const LINE_HEIGHT = 24; // px, should match the CSS line-height of the text
+
+  // ... inside ContractAnalyst ...
+  const [scanLineIndex, setScanLineIndex] = useState(0);
+  const [numLines, setNumLines] = useState(0);
+
+  // Calculate number of lines in contractText
+  useEffect(() => {
+    if (!contractText) {
+      setNumLines(0);
+      return;
+    }
+    // Count lines by splitting on newlines
+    const lines = contractText.split('\n');
+    setNumLines(lines.length);
+  }, [contractText]);
+
+  // Scanning animation: move the highlight bar line by line
+  useEffect(() => {
+    if (!isExtractingTerms || !contractTextRef.current || shouldReduceMotion) return;
+    setScanLineIndex(0);
+    if (numLines === 0) return;
+
+    let currentLine = 0;
+    const totalLines = numLines;
+    const interval = 40; // ms per line
+    const textContainer = contractTextRef.current;
+
+    const animate = () => {
+      setScanLineIndex(currentLine);
+      // Scroll if needed
+      const barTop = currentLine * LINE_HEIGHT;
+      const barBottom = barTop + LINE_HEIGHT;
+      const scrollTop = textContainer.scrollTop;
+      const containerHeight = textContainer.clientHeight;
+      if (barTop < scrollTop) {
+        textContainer.scrollTo({ top: barTop, behavior: 'smooth' });
+      } else if (barBottom > scrollTop + containerHeight) {
+        textContainer.scrollTo({ top: barBottom - containerHeight, behavior: 'smooth' });
+      }
+      currentLine++;
+      if (currentLine < totalLines) {
+        setTimeout(animate, interval);
+      } else {
+        // End of scan
+        setTimeout(() => setIsExtractingTerms(false), 300);
+      }
+    };
+    animate();
+    // Cleanup
+    return () => {};
+  }, [isExtractingTerms, contractText, numLines, shouldReduceMotion]);
 
   // Check for reduced motion preference
   useEffect(() => {
@@ -415,10 +549,14 @@ const ContractAnalyst = () => {
     if (!contractText || !category) return;
 
     const patterns: Record<string, RegExp[]> = {
-      'royalty-rates': [/(\d+(?:\.\d+)?%)/g, /royalty rate/gi],
-      'payment-terms': [/payment/gi, /due/gi, /within \d+ days/gi],
-      'reporting': [/report/gi, /statement/gi, /accounting period/gi],
-      'audit-rights': [/audit/gi, /inspect/gi, /records/gi]
+      'payable-currencies': [/(\d+(?:\.\d+)?%)/g, /payable currency/gi],
+      'per-user-fee-premium': [/premium fee/gi, /per user/gi, /per unit/gi],
+      'per-user-fee-student': [/student fee/gi, /per user/gi, /per unit/gi],
+      'rev-share-ad': [/ad revenue/gi, /share/gi, /per unit/gi],
+      'rev-share-premium': [/premium revenue/gi, /share/gi, /per unit/gi],
+      'minimum-guaranteed': [/minimum guarantee/gi, /per quarter/gi, /per unit/gi],
+      'advances': [/advance/gi, /per quarter/gi, /per unit/gi],
+      'reporting': [/report/gi, /statement/gi, /accounting period/gi]
     };
 
     const categoryPatterns = patterns[category as keyof typeof patterns];
@@ -466,74 +604,24 @@ const ContractAnalyst = () => {
     return baseDuration;
   };
 
-  // Add function to handle scanner position and auto-scrolling
-  const handleScannerPositionUpdate = useCallback(() => {
-    if (!isExtractingTerms || !contractTextRef.current || shouldReduceMotion) return;
+  // Optimize generateRandomWordHighlights with useCallback
+  const generateRandomWordHighlights = useCallback(() => {
+    if (!contractText) return [];
     
-    const textContainer = contractTextRef.current;
-    const textHeight = textContentHeightRef.current || 0;
-    const containerHeight = textContainer.clientHeight;
-    
-    // Calculate position based on time
-    const animationDuration = calculateScanDuration(textHeight) * 1000; // in ms
-    const scrollTimeInterval = 50; // Update every 50ms
-    
-    const scrollInterval = setInterval(() => {
-      if (!isExtractingTerms || scannerPaused) {
-        clearInterval(scrollInterval);
-        return;
-      }
-      
-      // Calculate current position based on elapsed time
-      const currentTime = Date.now();
-      const startTime = scannerStartTimeRef.current;
-      const elapsedTime = currentTime - startTime;
-      const normalizedProgress = Math.min(elapsedTime / animationDuration, 1);
-      
-      // Update scan position
-      const scanPos = Math.floor(normalizedProgress * textHeight);
-      setCurrentScanPosition(scanPos);
-      
-      // Auto-scroll
-      const scrollPosition = (normalizedProgress * textHeight) - (containerHeight / 2);
-      if (scrollPosition > 0) {
-        textContainer.scrollTop = scrollPosition;
-      }
-      
-      // End the scan when complete
-      if (normalizedProgress >= 1) {
-        clearInterval(scrollInterval);
-      }
-    }, scrollTimeInterval);
-    
-    return () => clearInterval(scrollInterval);
-  }, [isExtractingTerms, scannerPaused, shouldReduceMotion]);
-
-  // Add a reference to store the start time of the animation
-  const scannerStartTimeRef = useRef<number>(Date.now());
-
-  // Start the scanner when extraction begins
-  useEffect(() => {
-    if (isExtractingTerms && !scannerPaused) {
-      scannerStartTimeRef.current = Date.now();
-      handleScannerPositionUpdate();
-    }
-  }, [isExtractingTerms, scannerPaused, handleScannerPositionUpdate]);
-
-  // Function to generate random word highlights
-  const generateRandomWordHighlights = () => {
-    if (!contractText) return;
+    // Process in chunks to avoid freezing
+    const chunkSize = 1000;
     const words = contractText.split(/\s+/);
     const highlights: number[] = [];
     
-    // Highlight roughly 10% of words randomly
-    const numHighlights = Math.floor(words.length * 0.1);
+    // Only process a maximum of 100 highlights regardless of text size
+    const numHighlights = Math.min(Math.floor(words.length * 0.1), 100);
+    
     for (let i = 0; i < numHighlights; i++) {
       highlights.push(Math.floor(Math.random() * words.length));
     }
     
-    setRandomWords(highlights);
-  };
+    return highlights;
+  }, [contractText]);
 
   // Function to parse PDF file
   const parsePDF = async (file: File): Promise<string> => {
@@ -750,154 +838,77 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
     // Reset the flag immediately to prevent multiple executions
     setShouldStartExtraction(false);
 
-    // Activate the scanner immediately 
+    // Start with scanning process
+    setExtractionProcessState('scanning');
+    setIsExtractingTerms(true);
     scannerStartTimeRef.current = Date.now();
-    handleScannerPositionUpdate();
-    generateRandomWordHighlights();
+    
+    // Set initial random highlights
+    setRandomWords(generateRandomWordHighlights());
 
-    // Use a shorter scan time to make the process faster
-    const SCAN_TIME = 2000; // 2 seconds
+    // Fixed scan time regardless of text length
+    const SCAN_TIME = 3000; // 3 seconds fixed
 
     const processTerms = async () => {
       try {
-        setExtractionStatus('Analyzing contract terms...');
+        // Wait for scanning animation to complete
+        await new Promise(resolve => setTimeout(resolve, SCAN_TIME));
+        setIsExtractingTerms(false);
+        
+        // Start analyzing process
+        setExtractionProcessState('analyzing');
+        
+        // Call the API
+        const apiResponse = await extractTermsFromAPI(contractText);
 
-        // Call the API with a timeout to prevent long waits
-        const apiResponse = await Promise.race([
-          extractTermsFromAPI(contractText).catch(error => {
-            console.log('API call failed, using mock data:', error.message);
-            return null;
-          }),
-          new Promise((resolve) => setTimeout(() => {
-            console.log('API timeout, using mock data');
-            return resolve(null);
-          }, 3000)) // 3 second local timeout as additional safety
-        ]);
-
-        // Process the response and update the UI
-        setExtractionStatus('Processing extracted terms...');
+        // Start mapping process
+        setExtractionProcessState('mapping');
         
         // Process API response more efficiently
         const newTerms: ExtractedTerm[] = [];
         
-        // Helper function to add a term
-        const addTerm = (text: string, category: string, confidence: number, position?: { start: number, end: number }) => {
-          // Find the text position if not provided
-          let termPosition = position;
-          if (!termPosition) {
-            const textIndex = contractText.indexOf(text);
-            if (textIndex >= 0) {
-              termPosition = {
-                start: textIndex,
-                end: textIndex + text.length
-              };
-            } else {
-              // Skip terms that don't match the text
-              return;
-            }
-          }
-          
-          newTerms.push({
-            id: Math.random().toString(36).substr(2, 9),
-            text,
-            category,
-            confidence,
-            position: termPosition
+        // Process in chunks to avoid freezing
+        const processChunk = (startIdx: number) => {
+          return new Promise<void>(resolve => {
+            setTimeout(() => {
+              // Process a chunk of terms
+              const chunk: ApiTerm[] = apiResponse.terms?.slice(startIdx, startIdx + 10) || [];
+              chunk.forEach(term => {
+                if (term.text && term.category) {
+                  const textIndex = contractText.indexOf(term.text);
+                  if (textIndex >= 0) {
+                    newTerms.push({
+                      id: Math.random().toString(36).substr(2, 9),
+                      text: term.text,
+                      category: term.category,
+                      confidence: term.confidence || 0.85,
+                      position: {
+                        start: textIndex,
+                        end: textIndex + term.text.length
+                      }
+                    });
+                  }
+                }
+              });
+              resolve();
+            }, 0);
           });
         };
 
-        // If we have API response data, process it
-        if (apiResponse) {
-          // Process revenue shares
-          if (apiResponse.rev_share_subscription_revenue) {
-            addTerm(
-              `Subscription Revenue Share: ${apiResponse.rev_share_subscription_revenue}%`,
-              'royalty-rates',
-              0.98
-            );
-          }
-          
-          if (apiResponse.rev_share_advertising_revenue) {
-            addTerm(
-              `Advertising Revenue Share: ${apiResponse.rev_share_advertising_revenue}%`,
-              'royalty-rates',
-              0.98
-            );
-          }
-          
-          // Process minimum guarantee and advance
-          if (apiResponse.minimum_guarantee) {
-            addTerm(
-              `Minimum Guarantee: ${apiResponse.minimum_guarantee}`,
-              'payment-terms',
-              0.97
-            );
-          }
-          
-          if (apiResponse.advance) {
-            addTerm(
-              `Advance Payment: ${apiResponse.advance}`,
-              'payment-terms',
-              0.97
-            );
-          }
-          
-          // Process per_user_fee_premium and student fees
-          if (apiResponse.per_user_fee_premium) {
-            apiResponse.per_user_fee_premium.forEach((fee: any) => {
-              addTerm(
-                `Premium fee for ${fee.market_name}: ${fee.amount} ${fee.currency}`,
-                'payment-terms',
-                0.95
-              );
-            });
-          }
-          
-          if (apiResponse.per_user_fee_student) {
-            apiResponse.per_user_fee_student.forEach((fee: any) => {
-              addTerm(
-                `Student fee for ${fee.market_name}: ${fee.amount} ${fee.currency}`,
-                'payment-terms',
-                0.95
-              );
-            });
-          }
-          
-          // Process report fields
-          if (apiResponse.report_fields) {
-            apiResponse.report_fields.forEach((field: any) => {
-              addTerm(
-                `Report Field: ${field.field_name} - ${field.field_description}`,
-                'reporting',
-                0.9
-              );
-            });
-          }
-        }
-        
-        // Add some audit rights terms if there aren't any
-        if (!newTerms.some(term => term.category === 'audit-rights')) {
-          const auditMatch = contractText.match(/audit|inspect|records/gi);
-          if (auditMatch) {
-            addTerm(
-              `Audit Rights: Once per calendar year`,
-              'audit-rights',
-              0.85
-            );
-          }
+        // Process terms in chunks
+        const chunkSize = 10;
+        const terms = apiResponse.terms || [];
+        for (let i = 0; i < terms.length; i += chunkSize) {
+          await processChunk(i);
         }
 
-        // Let scanner animation run for minimum time to give visual feedback
-        const elapsedTime = Date.now() - scannerStartTimeRef.current;
-        if (elapsedTime < SCAN_TIME) {
-          await new Promise(resolve => setTimeout(resolve, SCAN_TIME - elapsedTime));
-        }
+        // Simulate mapping process time
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Update the UI with the extracted terms
+        // Complete the process
+        setExtractionProcessState('complete');
         setHighlightedTerms(newTerms);
-        setIsExtractingTerms(false);
         setIsExtractionComplete(true);
-        setExtractionStatus('Term extraction complete');
         setCurrentCategory(null);
         setScannerPaused(false);
         setCategories(cats => cats.map(cat => ({
@@ -917,7 +928,128 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
     // Start processing immediately
     processTerms();
 
-  }, [shouldStartExtraction, contractText, selectedTab, handleScannerPositionUpdate, generateRandomWordHighlights]);
+  }, [shouldStartExtraction, contractText, selectedTab, generateRandomWordHighlights]);
+
+  // Optimize scanner position update with better animation
+  const handleScannerPositionUpdate = useCallback(() => {
+    if (!isExtractingTerms || !contractTextRef.current || shouldReduceMotion) return;
+    
+    const textContainer = contractTextRef.current;
+    const textHeight = textContentHeightRef.current || 0;
+    const containerHeight = textContainer.clientHeight;
+    
+    // Use requestAnimationFrame for smoother animation
+    let animationFrameId: number;
+    const startTime = Date.now();
+    const duration = 3000; // Fixed 3 second duration
+    
+    const updatePosition = () => {
+      const currentTime = Date.now();
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // Update scan position
+      const scanPos = Math.floor(progress * textHeight);
+      setCurrentScanPosition(scanPos);
+      
+      // Auto-scroll with smooth behavior
+      const scrollPosition = (progress * textHeight) - (containerHeight / 2);
+      if (scrollPosition > 0) {
+        textContainer.scrollTo({
+          top: scrollPosition,
+          behavior: 'smooth'
+        });
+      }
+      
+      // Continue animation if not complete
+      if (progress < 1 && isExtractingTerms && !scannerPaused) {
+        animationFrameId = requestAnimationFrame(updatePosition);
+      } else if (progress >= 1) {
+        // Ensure we reset when done
+        setIsExtractingTerms(false);
+      }
+    };
+    
+    animationFrameId = requestAnimationFrame(updatePosition);
+    
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [isExtractingTerms, scannerPaused, shouldReduceMotion]);
+
+  // Start the scanner when extraction begins
+  useEffect(() => {
+    if (isExtractingTerms && !scannerPaused) {
+      scannerStartTimeRef.current = Date.now();
+      handleScannerPositionUpdate();
+    }
+  }, [isExtractingTerms, scannerPaused, handleScannerPositionUpdate]);
+
+  // Optimize the text rendering to avoid processing every character
+  const renderText = useMemo(() => {
+    if (!contractText) return null;
+
+    // Split text into chunks for more efficient rendering
+    const chunkSize = 500;
+    const chunks: JSX.Element[] = [];
+    
+    for (let i = 0; i < contractText.length; i += chunkSize) {
+      const chunk = contractText.slice(i, i + chunkSize);
+      const terms = highlightedTerms.filter(term => 
+        term.position.start >= i && term.position.start < (i + chunkSize)
+      );
+      
+      chunks.push(
+        <span key={i}>
+          {chunk.split('').map((char, index) => {
+            const absoluteIndex = i + index;
+            const term = terms.find(
+              t => absoluteIndex >= t.position.start && absoluteIndex < t.position.end
+            );
+            
+            if (term) {
+              const category = categories.find(c => c.id === term.category);
+              return (
+                <span
+                  key={absoluteIndex}
+                  style={{
+                    backgroundColor: term.isClicked 
+                      ? '#4F46E5'
+                      : category 
+                        ? `${category.color}1A`
+                        : 'transparent',
+                    color: term.isClicked ? 'white' : 'inherit'
+                  }}
+                >
+                  {char}
+                </span>
+              );
+            }
+            
+            return char;
+          })}
+        </span>
+      );
+    }
+    
+    return chunks;
+  }, [contractText, highlightedTerms, categories]);
+
+  // Add function to get process message
+  const getProcessMessage = () => {
+    switch (extractionProcessState) {
+      case 'scanning':
+        return 'Scanning Contract';
+      case 'analyzing':
+        return 'Analyzing Legal Language';
+      case 'mapping':
+        return 'Mapping terms to parameters';
+      default:
+        return '';
+    }
+  };
 
   return (
     <Box sx={{ width: '100%', bgcolor: '#FAFAFA', minHeight: '100vh', p: 0 }}>
@@ -1711,100 +1843,105 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
                           },
                         }}
                       >
-                        {/* Text content wrapper */}
-                        <Box
-                          ref={(el: HTMLDivElement | null) => {
-                            if (el) {
-                              const height = el.scrollHeight - 40;
-                              el.style.setProperty('--text-content-height', `${height}px`);
-                              textContentHeightRef.current = height;
-                            }
-                          }}
-                          sx={{ position: 'relative' }}
-                        >
-                          {/* Render contract text with highlighted terms */}
-                          {contractText.split('').map((char, index) => {
-                            const term = highlightedTerms.find(
-                              t => index >= t.position.start && index < t.position.end
-                            );
-                            const isRandomWord = randomWords.includes(
-                              contractText.slice(0, index).split(/\s+/).length
-                            );
-                            
-                                              if (term) {
-                    const category = categories.find(c => c.id === term.category);
-                    return (
-                      <span
-                        key={index}
-                        style={{
-                          backgroundColor: term.isClicked 
-                            ? '#4F46E5' // Full color for clicked term
-                            : category 
-                              ? `${category.color}1A` // 10% opacity for regular terms
-                              : 'transparent',
-                          transition: 'all 0.3s ease',
-                          color: term.isClicked ? 'white' : 'inherit',
-                          padding: term.isClicked ? '0 1px' : '0',
-                          borderRadius: term.isClicked ? '2px' : '0',
-                          animation: isExtractingTerms && currentScanPosition >= index 
-                            ? `${termHighlight} 0.5s ease-in-out`
-                            : 'none',
-                        }}
-                      >
-                        {char}
-                      </span>
-                    );
-                            }
-                            
-                            return (
-                              <span
-                                key={index}
-                                style={{
-                                  animation: isExtractingTerms && isRandomWord && currentScanPosition >= index
-                                    ? `${wordHighlight} 0.3s ease-in-out`
-                                    : 'none',
-                                }}
-                              >
-                                {char}
-                              </span>
-                            );
-                          })}
-
-                          {/* Scanner line animation */}
-                                                    {isExtractingTerms && !shouldReduceMotion && (
+                        {renderText}
+                        {/* Scanner line animation */}
+                        {isExtractingTerms && !shouldReduceMotion && (
+                          <>
+                            <Global styles={shimmerKeyframes} />
                             <Box
                               role="progressbar"
                               aria-label="Scanning contract text"
-                              aria-valuenow={Math.round(currentScanPosition)}
+                              aria-valuenow={scanLineIndex}
                               aria-valuemin={0}
-                              aria-valuemax={100}
+                              aria-valuemax={numLines}
                               sx={{
                                 position: 'absolute',
-                                top: `${currentScanPosition}px`,
+                                top: `${scanLineIndex * LINE_HEIGHT}px`,
                                 left: 0,
                                 right: 0,
-                                height: '24px',
-                                bgcolor: 'rgba(156, 163, 175, 0.7)',
-                                // Remove the animation property as we're controlling it manually
+                                height: `${LINE_HEIGHT}px`,
+                                borderRadius: '8px',
+                                background: 'linear-gradient(90deg, rgba(99,102,241,0.10) 0%, rgba(99,102,241,0.25) 50%, rgba(99,102,241,0.10) 100%)',
+                                boxShadow: '0 0 32px 8px rgba(99,102,241,0.18)',
+                                animation: `${scannerGlow} 1.5s infinite ease-in-out`,
+                                zIndex: 20,
                                 pointerEvents: 'none',
-                                borderTop: '1px solid rgba(107, 114, 128, 0.9)',
-                                borderBottom: '1px solid rgba(107, 114, 128, 0.9)',
                                 display: 'flex',
-                                justifyContent: 'flex-end',
                                 alignItems: 'center',
-                                pr: 2,
-                                '& .scanning-text': {
-                                  fontSize: '12px',
-                                  color: '#000000',
-                                  fontFamily: 'monospace',
-                                  userSelect: 'none'
-                                }
+                                justifyContent: 'center',
+                                overflow: 'hidden',
+                                mixBlendMode: 'lighten',
                               }}
                             >
-                              <span className="scanning-text">scanning</span>
+                              <Box
+                                sx={{
+                                  width: '100%',
+                                  height: '100%',
+                                  background: 'linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.18) 40%, rgba(255,255,255,0.32) 50%, rgba(255,255,255,0.18) 60%, transparent 100%)',
+                                  backgroundSize: '200% 100%',
+                                  animation: 'shimmer 2s linear infinite',
+                                }}
+                              />
                             </Box>
-                          )}
-                          </Box>
+                            <Box
+                              sx={{
+                                position: 'absolute',
+                                top: `${scanLineIndex * LINE_HEIGHT}px`,
+                                left: 0,
+                                right: 0,
+                                height: `${LINE_HEIGHT}px`,
+                                pointerEvents: 'none',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'flex-end',
+                                pr: 2,
+                                zIndex: 21
+                              }}
+                            >
+                              <Box sx={{
+                                fontSize: '13px',
+                                fontFamily: 'monospace',
+                                color: '#4F46E5',
+                                backgroundColor: 'rgba(255, 255, 255, 0.85)',
+                                px: 1.5,
+                                py: 0.5,
+                                borderRadius: '4px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 1,
+                                boxShadow: '0 2px 4px rgba(79, 70, 229, 0.12)',
+                              }}>
+                                <Box component="span" sx={{
+                                  width: '8px',
+                                  height: '8px',
+                                  borderRadius: '50%',
+                                  bgcolor: '#4F46E5',
+                                  animation: `${scannerGlow} 1.5s infinite ease-in-out`,
+                                }} />
+                                scanning
+                              </Box>
+                            </Box>
+                            {/* Data streaming effect can be left for extra flair, but keep it subtle */}
+                            {Array.from({ length: 3 }).map((_, i) => (
+                              <Box
+                                key={i}
+                                sx={{
+                                  position: 'absolute',
+                                  top: `${currentScanPosition + (i * 6) - 12}px`,
+                                  left: `${15 + (i * 10)}%`,
+                                  width: '2px',
+                                  height: '32px',
+                                  bgcolor: '#6366f1',
+                                  opacity: 0.18,
+                                  animation: `${dataStreamAnimation} ${1 + (i * 0.2)}s infinite`,
+                                  animationDelay: `${i * 0.13}s`,
+                                  pointerEvents: 'none',
+                                  zIndex: 19
+                                }}
+                              />
+                            ))}
+                          </>
+                        )}
                       </Box>
                     </Paper>
                   </Box>
@@ -1812,7 +1949,7 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
                   {/* Categories and Progress Panel */}
                   <Box sx={{
                     width: '600px',
-                    height: '100%' // Take full height of container
+                    height: '100%'
                   }}>
                     <Paper 
                       sx={{ 
@@ -1837,7 +1974,7 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
                           fontWeight: 500,
                           color: '#1A1A1A'
                         }}>
-                          AI-Identified Terms
+                          {extractionProcessState === 'complete' ? 'AI-Identified Terms' : 'Term Extraction Progress'}
                         </Typography>
                       </Box>
 
@@ -1848,364 +1985,369 @@ This Royalty Agreement (the "Agreement") is entered into as of May 19, 2025, by 
                           overflowY: 'auto',
                           display: 'flex',
                           flexDirection: 'column',
-                          gap: 3,
-                          '&::-webkit-scrollbar': {
-                            width: '8px',
-                          },
-                          '&::-webkit-scrollbar-track': {
-                            backgroundColor: '#F1F1F1',
-                            borderRadius: '4px',
-                          },
-                          '&::-webkit-scrollbar-thumb': {
-                            backgroundColor: '#C1C1C1',
-                            borderRadius: '4px',
-                            '&:hover': {
-                              backgroundColor: '#A1A1A1',
-                            },
-                          },
+                          gap: 3
                         }}
-                        role="list"
-                        aria-label="AI-Identified Terms"
                       >
-                        {categories.map(category => {
-                          const categoryTerms = highlightedTerms.filter(term => term.category === category.id);
-                          if (categoryTerms.length === 0) return null;
-                          
-                          const isExpanded = expandedCategories.has(category.id);
+                        {extractionProcessState !== 'complete' ? (
+                          <Box sx={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            height: '100%',
+                            gap: 3
+                          }}>
+                            <CircularProgress size={48} sx={{ color: '#4F46E5' }} />
+                            <Typography sx={{
+                              fontSize: '16px',
+                              fontWeight: 500,
+                              color: '#1A1A1A',
+                              textAlign: 'center'
+                            }}>
+                              {getProcessMessage()}
+                            </Typography>
+                          </Box>
+                        ) : (
+                          categories.map(category => {
+                            const categoryTerms = highlightedTerms.filter(term => term.category === category.id);
+                            if (categoryTerms.length === 0) return null;
+                            
+                            const isExpanded = expandedCategories.has(category.id);
 
-                          return (
-                            <Paper
-                              key={category.id}
-                              sx={{
-                                p: 2,
-                                borderRadius: '12px',
-                                border: '1px solid #E5E7EB',
-                                bgcolor: 'white',
-                                animation: `${termCardAppear} 0.3s ease-out`,
-                              }}
-                              role="listitem"
-                            >
-                              <Box 
-                                onClick={() => toggleCategory(category.id)}
-                                sx={{ 
-                                  cursor: 'pointer',
-                                  '&:hover': {
-                                    '& .expand-icon': {
-                                      bgcolor: '#F3F4F6'
-                                    }
-                                  }
+                            return (
+                              <Paper
+                                key={category.id}
+                                sx={{
+                                  p: 2,
+                                  borderRadius: '12px',
+                                  border: '1px solid #E5E7EB',
+                                  bgcolor: 'white',
+                                  animation: `${termCardAppear} 0.3s ease-out`,
                                 }}
+                                role="listitem"
                               >
-                                <Box sx={{ 
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'space-between',
-                                  mb: isExpanded ? 2 : 0
-                                }}>
+                                <Box 
+                                  onClick={() => toggleCategory(category.id)}
+                                  sx={{ 
+                                    cursor: 'pointer',
+                                    '&:hover': {
+                                      '& .expand-icon': {
+                                        bgcolor: '#F3F4F6'
+                                      }
+                                    }
+                                  }}
+                                >
                                   <Box sx={{ 
                                     display: 'flex',
                                     alignItems: 'center',
-                                    gap: 1,
-                                    flex: 1
+                                    justifyContent: 'space-between',
+                                    mb: isExpanded ? 2 : 0
                                   }}>
                                     <Box sx={{ 
                                       display: 'flex',
                                       alignItems: 'center',
-                                      gap: 1
+                                      gap: 1,
+                                      flex: 1
                                     }}>
-                                      <svg 
-                                        xmlns="http://www.w3.org/2000/svg" 
-                                        width="16" 
-                                        height="16" 
-                                        viewBox="0 0 24 24" 
-                                        fill="none" 
-                                        stroke="currentColor" 
-                                        strokeWidth="2" 
-                                        strokeLinecap="round" 
-                                        strokeLinejoin="round"
-                                        style={{ color: '#4F46E5' }}
-                                        role="img"
-                                        aria-hidden="true"
-                                      >
-                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                        <polyline points="14 2 14 8 20 8" />
-                                        <line x1="16" y1="13" x2="8" y2="13" />
-                                        <line x1="16" y1="17" x2="8" y2="17" />
-                                        <line x1="10" y1="9" x2="8" y2="9" />
-                                      </svg>
-                                      <Typography
-                                        sx={{
-                                          fontSize: '16px',
-                                          fontWeight: 600,
-                                          color: '#1A1A1A'
-                                        }}
-                                      >
-                                        {category.name}
-                                      </Typography>
-                                    </Box>
-
-                                    <Box
-                                      className="expand-icon"
-                                      sx={{
-                                        ml: 'auto',
-                                        mr: 2,
-                                        width: 24,
-                                        height: 24,
-                                        borderRadius: '50%',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        transition: 'background-color 0.2s ease',
-                                      }}
-                                    >
-                                      <svg
-                                        width="20"
-                                        height="20"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        style={{ 
-                                          color: '#666666',
-                                          transform: `rotate(${isExpanded ? '180deg' : '0deg'})`,
-                                          transition: 'transform 0.2s ease'
-                                        }}
-                                      >
-                                        <polyline points="6 9 12 15 18 9" />
-                                      </svg>
-                                    </Box>
-                                  </Box>
-                                </Box>
-                              </Box>
-
-                              <Box
-                                sx={{
-                                  mt: 2,
-                                  overflow: 'hidden',
-                                  maxHeight: isExpanded ? '1000px' : '0px',
-                                  transition: 'max-height 0.3s ease-in-out',
-                                  opacity: isExpanded ? 1 : 0,
-                                  visibility: isExpanded ? 'visible' : 'hidden',
-                                }}
-                              >
-                                {categoryTerms.length === 1 ? (
-                                  // Single term display
-                                  <Box
-                                    sx={{
-                                      p: 1.5,
-                                      bgcolor: '#F9FAFB',
-                                      borderRadius: '8px',
-                                      cursor: 'pointer',
-                                      '&:hover': {
-                                        bgcolor: '#F3F4F6'
-                                      }
-                                    }}
-                                  >
-                                    <Box sx={{ 
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'space-between'
-                                    }}>
-                                      <Typography
-                                        sx={{
-                                          fontSize: '14px',
-                                          color: '#1A1A1A',
-                                          flex: 1
-                                        }}
-                                      >
-                                        {categoryTerms[0].text}
-                                      </Typography>
                                       <Box sx={{ 
                                         display: 'flex',
                                         alignItems: 'center',
-                                        gap: 2
+                                        gap: 1
                                       }}>
-                                        <Box
+                                        <svg 
+                                          xmlns="http://www.w3.org/2000/svg" 
+                                          width="16" 
+                                          height="16" 
+                                          viewBox="0 0 24 24" 
+                                          fill="none" 
+                                          stroke="currentColor" 
+                                          strokeWidth="2" 
+                                          strokeLinecap="round" 
+                                          strokeLinejoin="round"
+                                          style={{ color: '#4F46E5' }}
+                                          role="img"
+                                          aria-hidden="true"
+                                        >
+                                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                          <polyline points="14 2 14 8 20 8" />
+                                          <line x1="16" y1="13" x2="8" y2="13" />
+                                          <line x1="16" y1="17" x2="8" y2="17" />
+                                          <line x1="10" y1="9" x2="8" y2="9" />
+                                        </svg>
+                                        <Typography
                                           sx={{
-                                            px: 2,
-                                            pt: 0.5,
-                                            pb: 1,
-                                            borderRadius: '100px',
-                                            bgcolor: `rgba(${
-                                              categoryTerms[0].confidence >= 0.9 ? '34, 197, 94' :
-                                              categoryTerms[0].confidence >= 0.75 ? '245, 158, 11' :
-                                              '239, 68, 68'
-                                            }, 0.1)`,
-                                            color: categoryTerms[0].confidence >= 0.9 ? '#22C55E' :
-                                                  categoryTerms[0].confidence >= 0.75 ? '#F59E0B' :
-                                                  '#EF4444',
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            alignItems: 'center',
-                                            gap: 0.5
+                                            fontSize: '16px',
+                                            fontWeight: 600,
+                                            color: '#1A1A1A'
                                           }}
                                         >
-                                          <Typography
-                                            sx={{
-                                              fontSize: '13px',
-                                              fontWeight: 500,
-                                              lineHeight: 1
-                                            }}
-                                          >
-                                            {Math.round(categoryTerms[0].confidence * 100)}% confidence
-                                          </Typography>
-                                          <Box
-                                            sx={{
-                                              width: '100%',
-                                              height: '3px',
-                                              bgcolor: 'rgba(0, 0, 0, 0.1)',
-                                              borderRadius: '100px',
-                                              overflow: 'hidden'
-                                            }}
-                                          >
-                                            <Box
-                                              sx={{
-                                                width: `${Math.round(categoryTerms[0].confidence * 100)}%`,
-                                                height: '100%',
-                                                bgcolor: categoryTerms[0].confidence >= 0.9 ? '#22C55E' :
-                                                       categoryTerms[0].confidence >= 0.75 ? '#F59E0B' :
-                                                       '#EF4444',
-                                                transition: 'width 0.3s ease-in-out'
-                                              }}
-                                            />
-                                          </Box>
-                                        </Box>
-                                        <IconButton
-                                          size="small"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            scrollToTerm(categoryTerms[0].position);
-                                          }}
-                                          sx={{
+                                          {category.name}
+                                        </Typography>
+                                      </Box>
+
+                                      <Box
+                                        className="expand-icon"
+                                        sx={{
+                                          ml: 'auto',
+                                          mr: 2,
+                                          width: 24,
+                                          height: 24,
+                                          borderRadius: '50%',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          transition: 'background-color 0.2s ease',
+                                        }}
+                                      >
+                                        <svg
+                                          width="20"
+                                          height="20"
+                                          viewBox="0 0 24 24"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="2"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          style={{ 
                                             color: '#666666',
-                                            '&:hover': {
-                                              bgcolor: 'rgba(79, 70, 229, 0.04)',
-                                              color: '#4F46E5'
-                                            }
+                                            transform: `rotate(${isExpanded ? '180deg' : '0deg'})`,
+                                            transition: 'transform 0.2s ease'
                                           }}
                                         >
-                                          <SearchIcon sx={{ fontSize: 20 }} />
-                                        </IconButton>
+                                          <polyline points="6 9 12 15 18 9" />
+                                        </svg>
                                       </Box>
                                     </Box>
                                   </Box>
-                                ) : (
-                                  // Multiple terms display
-                                  <Box sx={{ 
-                                    display: 'flex', 
-                                    flexDirection: 'column',
-                                    gap: 1
-                                  }}>
-                                    {categoryTerms.map((term, index) => (
-                                      <Box
-                                        key={term.id}
-                                        sx={{
-                                          p: 1.5,
-                                          bgcolor: '#F9FAFB',
-                                          borderRadius: '8px',
-                                          '&:hover': {
-                                            bgcolor: '#F3F4F6'
-                                          }
-                                        }}
-                                      >
+                                </Box>
+
+                                <Box
+                                  sx={{
+                                    mt: 2,
+                                    overflow: 'hidden',
+                                    maxHeight: isExpanded ? '1000px' : '0px',
+                                    transition: 'max-height 0.3s ease-in-out',
+                                    opacity: isExpanded ? 1 : 0,
+                                    visibility: isExpanded ? 'visible' : 'hidden',
+                                  }}
+                                >
+                                  {categoryTerms.length === 1 ? (
+                                    // Single term display
+                                    <Box
+                                      sx={{
+                                        p: 1.5,
+                                        bgcolor: '#F9FAFB',
+                                        borderRadius: '8px',
+                                        cursor: 'pointer',
+                                        '&:hover': {
+                                          bgcolor: '#F3F4F6'
+                                        }
+                                      }}
+                                    >
+                                      <Box sx={{ 
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between'
+                                      }}>
+                                        <Typography
+                                          sx={{
+                                            fontSize: '14px',
+                                            color: '#1A1A1A',
+                                            flex: 1
+                                          }}
+                                        >
+                                          {categoryTerms[0].text}
+                                        </Typography>
                                         <Box sx={{ 
                                           display: 'flex',
                                           alignItems: 'center',
-                                          justifyContent: 'space-between'
+                                          gap: 2
                                         }}>
-                                          <Typography
+                                          <Box
                                             sx={{
-                                              fontSize: '14px',
-                                              color: '#1A1A1A',
-                                              fontWeight: 500,
-                                              flex: 1
+                                              px: 2,
+                                              pt: 0.5,
+                                              pb: 1,
+                                              borderRadius: '100px',
+                                              bgcolor: `rgba(${
+                                                categoryTerms[0].confidence >= 0.9 ? '34, 197, 94' :
+                                                categoryTerms[0].confidence >= 0.75 ? '245, 158, 11' :
+                                                '239, 68, 68'
+                                              }, 0.1)`,
+                                              color: categoryTerms[0].confidence >= 0.9 ? '#22C55E' :
+                                                    categoryTerms[0].confidence >= 0.75 ? '#F59E0B' :
+                                                    '#EF4444',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              alignItems: 'center',
+                                              gap: 0.5
                                             }}
                                           >
-                                            {`Tier ${index + 1}: ${term.text}`}
-                                          </Typography>
+                                            <Typography
+                                              sx={{
+                                                fontSize: '13px',
+                                                fontWeight: 500,
+                                                lineHeight: 1
+                                              }}
+                                            >
+                                              {Math.round(categoryTerms[0].confidence * 100)}% confidence
+                                            </Typography>
+                                            <Box
+                                              sx={{
+                                                width: '100%',
+                                                height: '3px',
+                                                bgcolor: 'rgba(0, 0, 0, 0.1)',
+                                                borderRadius: '100px',
+                                                overflow: 'hidden'
+                                              }}
+                                            >
+                                              <Box
+                                                sx={{
+                                                  width: `${Math.round(categoryTerms[0].confidence * 100)}%`,
+                                                  height: '100%',
+                                                  bgcolor: categoryTerms[0].confidence >= 0.9 ? '#22C55E' :
+                                                         categoryTerms[0].confidence >= 0.75 ? '#F59E0B' :
+                                                         '#EF4444',
+                                                  transition: 'width 0.3s ease-in-out'
+                                                }}
+                                              />
+                                            </Box>
+                                          </Box>
+                                          <IconButton
+                                            size="small"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              scrollToTerm(categoryTerms[0].position);
+                                            }}
+                                            sx={{
+                                              color: '#666666',
+                                              '&:hover': {
+                                                bgcolor: 'rgba(79, 70, 229, 0.04)',
+                                                color: '#4F46E5'
+                                              }
+                                            }}
+                                          >
+                                            <SearchIcon sx={{ fontSize: 20 }} />
+                                          </IconButton>
+                                        </Box>
+                                      </Box>
+                                    </Box>
+                                  ) : (
+                                    // Multiple terms display
+                                    <Box sx={{ 
+                                      display: 'flex', 
+                                      flexDirection: 'column',
+                                      gap: 1
+                                    }}>
+                                      {categoryTerms.map((term, index) => (
+                                        <Box
+                                          key={term.id}
+                                          sx={{
+                                            p: 1.5,
+                                            bgcolor: '#F9FAFB',
+                                            borderRadius: '8px',
+                                            '&:hover': {
+                                              bgcolor: '#F3F4F6'
+                                            }
+                                          }}
+                                        >
                                           <Box sx={{ 
                                             display: 'flex',
                                             alignItems: 'center',
-                                            gap: 2
+                                            justifyContent: 'space-between'
                                           }}>
-                                            <Box
+                                            <Typography
                                               sx={{
-                                                px: 2,
-                                                pt: 0.5,
-                                                pb: 1,
-                                                borderRadius: '100px',
-                                                bgcolor: `rgba(${
-                                                  term.confidence >= 0.9 ? '34, 197, 94' :
-                                                  term.confidence >= 0.75 ? '245, 158, 11' :
-                                                  '239, 68, 68'
-                                                }, 0.1)`,
-                                                color: term.confidence >= 0.9 ? '#22C55E' :
-                                                      term.confidence >= 0.75 ? '#F59E0B' :
-                                                      '#EF4444',
-                                                display: 'flex',
-                                                flexDirection: 'column',
-                                                alignItems: 'center',
-                                                gap: 0.5
+                                                fontSize: '14px',
+                                                color: '#1A1A1A',
+                                                fontWeight: 500,
+                                                flex: 1
                                               }}
                                             >
-                                              <Typography
-                                                sx={{
-                                                  fontSize: '13px',
-                                                  fontWeight: 500,
-                                                  lineHeight: 1
-                                                }}
-                                              >
-                                                {Math.round(term.confidence * 100)}% confidence
-                                              </Typography>
+                                              {`Tier ${index + 1}: ${term.text}`}
+                                            </Typography>
+                                            <Box sx={{ 
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              gap: 2
+                                            }}>
                                               <Box
                                                 sx={{
-                                                  width: '100%',
-                                                  height: '3px',
-                                                  bgcolor: 'rgba(0, 0, 0, 0.1)',
+                                                  px: 2,
+                                                  pt: 0.5,
+                                                  pb: 1,
                                                   borderRadius: '100px',
-                                                  overflow: 'hidden'
+                                                  bgcolor: `rgba(${
+                                                    term.confidence >= 0.9 ? '34, 197, 94' :
+                                                    term.confidence >= 0.75 ? '245, 158, 11' :
+                                                    '239, 68, 68'
+                                                  }, 0.1)`,
+                                                  color: term.confidence >= 0.9 ? '#22C55E' :
+                                                        term.confidence >= 0.75 ? '#F59E0B' :
+                                                        '#EF4444',
+                                                  display: 'flex',
+                                                  flexDirection: 'column',
+                                                  alignItems: 'center',
+                                                  gap: 0.5
                                                 }}
                                               >
+                                                <Typography
+                                                  sx={{
+                                                    fontSize: '13px',
+                                                    fontWeight: 500,
+                                                    lineHeight: 1
+                                                  }}
+                                                >
+                                                  {Math.round(term.confidence * 100)}% confidence
+                                                </Typography>
                                                 <Box
                                                   sx={{
-                                                    width: `${Math.round(term.confidence * 100)}%`,
-                                                    height: '100%',
-                                                    bgcolor: term.confidence >= 0.9 ? '#22C55E' :
-                                                           term.confidence >= 0.75 ? '#F59E0B' :
-                                                           '#EF4444',
-                                                    transition: 'width 0.3s ease-in-out'
+                                                    width: '100%',
+                                                    height: '3px',
+                                                    bgcolor: 'rgba(0, 0, 0, 0.1)',
+                                                    borderRadius: '100px',
+                                                    overflow: 'hidden'
                                                   }}
-                                                />
+                                                >
+                                                  <Box
+                                                    sx={{
+                                                      width: `${Math.round(term.confidence * 100)}%`,
+                                                      height: '100%',
+                                                      bgcolor: term.confidence >= 0.9 ? '#22C55E' :
+                                                             term.confidence >= 0.75 ? '#F59E0B' :
+                                                             '#EF4444',
+                                                      transition: 'width 0.3s ease-in-out'
+                                                    }}
+                                                  />
+                                                </Box>
                                               </Box>
+                                              <IconButton
+                                                size="small"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  scrollToTerm(term.position);
+                                                }}
+                                                sx={{
+                                                  color: '#666666',
+                                                  '&:hover': {
+                                                    bgcolor: 'rgba(79, 70, 229, 0.04)',
+                                                    color: '#4F46E5'
+                                                  }
+                                                }}
+                                              >
+                                                <SearchIcon sx={{ fontSize: 20 }} />
+                                              </IconButton>
                                             </Box>
-                                            <IconButton
-                                              size="small"
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                scrollToTerm(term.position);
-                                              }}
-                                              sx={{
-                                                color: '#666666',
-                                                '&:hover': {
-                                                  bgcolor: 'rgba(79, 70, 229, 0.04)',
-                                                  color: '#4F46E5'
-                                                }
-                                              }}
-                                            >
-                                              <SearchIcon sx={{ fontSize: 20 }} />
-                                            </IconButton>
                                           </Box>
                                         </Box>
-                                      </Box>
-                                    ))}
-                                  </Box>
-                                )}
-                              </Box>
-                            </Paper>
-                          );
-                        })}
+                                      ))}
+                                    </Box>
+                                  )}
+                                </Box>
+                              </Paper>
+                            );
+                          })
+                        )}
                       </Box>
                     </Paper>
                   </Box>
