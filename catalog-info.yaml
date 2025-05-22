@@ -1,0 +1,9 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: royai-contract
+  description: RoyAI Contract Service
+  owner: your-team
+spec:
+  type: service
+  lifecycle: production 
